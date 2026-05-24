@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHRONOS // Local GraphRAG SRE Agent</title>
+    <!-- Google Fonts & FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --bg-deep: #080c14;
+            --bg-card: rgba(17, 24, 39, 0.7);
+            --bg-terminal: #0d131f;
+            --border-glow: rgba(56, 189, 248, 0.2);
+            --border-glow-active: rgba(56, 189, 248, 0.6);
+            --neon-blue: #38bdf8;
+            --neon-green: #10b981;
+            --neon-amber: #f59e0b;
+            --neon-red: #ef4444;
+            --neon-purple: #a855f7;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.07) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.05) 0px, transparent 50%);
+            min-height: 100vh;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-deep);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-glow);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--neon-blue);
+        }
+
+        /* Top Header Navigation */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.2rem 2.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            background: rgba(8, 12, 20, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .logo-section i {
+            font-size: 1.8rem;
+            color: var(--neon-blue);
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+            animation: pulse-glow 2s infinite alternate;
+        }
+
+        .logo-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, var(--neon-blue) 0%, var(--neon-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .system-status {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--neon-green);
+            padding: 0.4rem 0.8rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--neon-green);
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 8px var(--neon-green);
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        /* Layout Grid */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 320px 1fr 380px;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        /* Glass Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-glow);
+            border-radius: 16px;
+            padding: 1.5rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            border-color: rgba(56, 189, 248, 0.35);
+            box-shadow: 0 12px 40px 0 rgba(56, 189, 248, 0.05);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.2rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0.6rem;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .card-title i {
+            color: var(--neon-blue);
+        }
+
+        /* Chaos Panel Triggers */
+        .chaos-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .chaos-btn {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            padding: 1rem;
+            border-radius: 12px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            text-align: left;
+            position: relative;
+        }
+
+        .chaos-btn::after {
+            content: '';
+            position: absolute;
+            right: 1.2rem;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: transparent;
+            transition: all 0.2s ease;
+        }
+
+        .chaos-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            transform: translateX(4px);
+        }
+
+        /* Failure Modes specific styling */
+        .chaos-btn[data-mode="none"]:hover, .chaos-btn[data-mode="none"].active {
+            border-color: var(--neon-green);
+            background: rgba(16, 185, 129, 0.05);
+            color: var(--neon-green);
+        }
+        .chaos-btn[data-mode="none"].active::after { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
+
+        .chaos-btn[data-mode="database_slowdown"]:hover, .chaos-btn[data-mode="database_slowdown"].active {
+            border-color: var(--neon-amber);
+            background: rgba(245, 158, 11, 0.05);
+            color: var(--neon-amber);
+        }
+        .chaos-btn[data-mode="database_slowdown"].active::after { background: var(--neon-amber); box-shadow: 0 0 8px var(--neon-amber); }
+
+        .chaos-btn[data-mode="payment_gateway_down"]:hover, .chaos-btn[data-mode="payment_gateway_down"].active {
+            border-color: var(--neon-red);
+            background: rgba(239, 68, 68, 0.05);
+            color: var(--neon-red);
+        }
+        .chaos-btn[data-mode="payment_gateway_down"].active::after { background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red); }
+
+        .chaos-btn[data-mode="auth_leak"]:hover, .chaos-btn[data-mode="auth_leak"].active {
+            border-color: var(--neon-purple);
+            background: rgba(168, 85, 247, 0.05);
+            color: var(--neon-purple);
+        }
+        .chaos-btn[data-mode="auth_leak"].active::after { background: var(--neon-purple); box-shadow: 0 0 8px var(--neon-purple); }
+
+        /* Trigger Agent button */
+        .trigger-agent-btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--neon-blue) 0%, var(--neon-purple) 100%);
+            color: white;
+            border: none;
+            padding: 1.1rem;
+            border-radius: 12px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            margin-top: 1.5rem;
+            box-shadow: 0 4px 20px rgba(56, 189, 248, 0.25);
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .trigger-agent-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px rgba(56, 189, 248, 0.4);
+            filter: brightness(1.1);
+        }
+
+        .trigger-agent-btn:active {
+            transform: translateY(1px);
+        }
+
+        .trigger-agent-btn.scanning {
+            background: linear-gradient(90deg, #1f2937, #374151, #1f2937);
+            background-size: 200% 100%;
+            animation: loading-shimmer 1.5s infinite linear;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        /* Center Canvas: D3 Graph */
+        .canvas-card {
+            height: 520px;
+            position: relative;
+        }
+
+        #graph-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .edge-label {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.8rem;
+            fill: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .edge-latency {
+            font-weight: 600;
+        }
+
+        /* Sieved Metrics Cards */
+        .metric-mini-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.2rem;
+        }
+
+        .metric-mini-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 0.8rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .metric-lbl {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .metric-val {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        /* Sieved Logs Terminal */
+        .terminal-box {
+            background: var(--bg-terminal);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            height: 250px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.75rem;
+            padding: 1rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .log-line {
+            display: flex;
+            gap: 0.5rem;
+            line-height: 1.4;
+        }
+
+        .log-time { color: #565f89; flex-shrink: 0; }
+        .log-service { color: var(--neon-blue); font-weight: 500; flex-shrink: 0; }
+        .log-lvl { font-weight: 600; flex-shrink: 0; }
+        .log-lvl.INFO { color: var(--neon-green); }
+        .log-lvl.WARNING { color: var(--neon-amber); }
+        .log-lvl.ERROR { color: var(--neon-red); }
+        .log-lvl.CRITICAL { color: #ffffff; background-color: var(--neon-red); padding: 0 2px; border-radius: 2px; }
+        .log-msg { color: #a9b1d6; word-break: break-word; }
+
+        /* Bottom Section: Report Card */
+        .report-section {
+            grid-column: 1 / -1;
+            margin-top: 1.5rem;
+            display: none;
+            animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .report-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 2rem;
+        }
+
+        .confidence-circle-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+            padding-right: 2rem;
+        }
+
+        .confidence-circle {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .confidence-circle svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .confidence-circle circle {
+            fill: none;
+            stroke-width: 8;
+            stroke-linecap: round;
+        }
+
+        .confidence-circle .circle-bg {
+            stroke: rgba(255, 255, 255, 0.03);
+        }
+
+        .confidence-circle .circle-progress {
+            stroke: url(#cyan-purple-grad);
+            stroke-dasharray: 414;
+            stroke-dashoffset: 414;
+            transition: stroke-dashoffset 1s ease-in-out;
+        }
+
+        .confidence-value {
+            position: absolute;
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--neon-blue) 0%, var(--neon-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .confidence-lbl {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 500;
+        }
+
+        .report-details {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .remediation-block {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+        }
+
+        .remediation-block h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--neon-blue);
+        }
+
+        .remediation-item {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: #a9b1d6;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.6rem 0.8rem;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .remediation-item button {
+            background: transparent;
+            border: none;
+            color: var(--neon-blue);
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .remediation-item button:hover {
+            opacity: 1;
+        }
+
+        .causal-path-list {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-top: 0.4rem;
+            overflow-x: auto;
+            padding-bottom: 0.3rem;
+        }
+
+        .causal-node {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .causal-node.origin {
+            border-color: var(--neon-red);
+            background: rgba(239, 68, 68, 0.05);
+            color: var(--neon-red);
+            font-weight: 600;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.15);
+        }
+
+        .causal-arrow {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* Animations */
+        @keyframes pulse-glow {
+            from { filter: drop-shadow(0 0 2px rgba(56, 189, 248, 0.3)); }
+            to { filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.8)); }
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.4; }
+            100% { transform: scale(1); opacity: 1; box-shadow: 0 0 12px var(--neon-green); }
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(30px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes loading-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo-section">
+            <i class="fa-solid fa-network-wired"></i>
+            <span class="logo-title">CHRONOS // ENGINE</span>
+        </div>
+        <div class="system-status">
+            <span id="chaos-status-text" style="font-size: 0.9rem; color: var(--text-muted); font-weight: 500;">
+                ACTIVE PATHWAY: <span style="color: var(--neon-green); font-weight:600;">STANDARD OPERATION</span>
+            </span>
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span>SIMULATOR: LIVE</span>
+            </div>
+            <button onclick="resetSystem()" style="background: transparent; border: 1px solid rgba(255,255,255,0.08); color: var(--text-muted); padding: 0.4rem 0.8rem; border-radius: 8px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;"><i class="fa-solid fa-arrows-rotate"></i> Reset DB</button>
+        </div>
+    </header>
+
+    <div class="dashboard-container">
+        <!-- LEFT: Agent Query panel -->
+        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+            <div>
+                <div class="card-header">
+                    <span class="card-title"><i class="fa-solid fa-terminal"></i> GraphRAG Agent</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                    <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.4;">
+                        Ask the local Ollama (or Gemini) agent questions about the codebase architecture. The agent will read the D3 graph structure and answer causally.
+                    </p>
+                    <textarea id="agent-query-input" rows="4" placeholder="E.g. Analyze the codebase for any bottlenecks or architecture flaws..." style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: var(--text-main); padding: 0.8rem; font-family: 'Outfit', sans-serif; font-size: 0.9rem; resize: none;"></textarea>
+                    
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px;">
+                        <span style="font-size: 0.75rem; color: var(--neon-blue); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-solid fa-gear"></i> LLM Configuration (Optional)</span>
+                        <input type="text" id="ollama-url" value="http://localhost:11434/api/generate" placeholder="Ollama URL" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem; margin-bottom: 0.4rem;">
+                        <input type="text" id="ollama-model" value="llama3" placeholder="Ollama Model" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem; margin-bottom: 0.4rem;">
+                        <input type="password" id="gemini-key" placeholder="Gemini API Key (overrides Ollama)" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem;">
+                        <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic;">Note: If using local Ollama, ensure you run `ollama serve` and provide a downloaded model name.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <button id="agent-btn" class="trigger-agent-btn" onclick="triggerDiagnosis()">
+                <i class="fa-solid fa-brain"></i> Ask Agent
+            </button>
+        </div>
+
+        <!-- CENTER: Call Graph Canvas -->
+        <div class="card canvas-card">
+            <div class="card-header">
+                <span class="card-title"><i class="fa-solid fa-diagram-project"></i> Dynamic JIT GraphRAG Map</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted); font-family: 'Fira Code', monospace;">LOOKBACK: 20 MIN</span>
+            </div>
+            <svg id="graph-canvas"></svg>
+        </div>
+
+        <!-- RIGHT: Logs & Metrics -->
+        <div class="card" style="display: flex; flex-direction: column; gap: 1.5rem;">
+            <div>
+                <div class="card-header">
+                    <span class="card-title"><i class="fa-solid fa-chart-line"></i> Telemetry Metrics</span>
+                </div>
+                <div class="metric-mini-grid">
+                    <div class="metric-mini-card">
+                        <span class="metric-lbl">Total Traces</span>
+                        <span id="metric-traces" class="metric-val">--</span>
+                    </div>
+                    <div class="metric-mini-card">
+                        <span class="metric-lbl">Gateway Latency</span>
+                        <span id="metric-latency" class="metric-val">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="flex-grow: 1; display: flex; flex-direction: column;">
+                <div class="card-header" style="margin-bottom: 0.8rem;">
+                    <span class="card-title"><i class="fa-solid fa-terminal"></i> Sieved Operational Logs</span>
+                    <span style="font-size: 0.7rem; color: var(--neon-red); font-weight: 600;"><i class="fa-solid fa-circle-exclamation"></i> WARNING+</span>
+                </div>
+                <div id="terminal" class="terminal-box">
+                    <div style="color: var(--text-muted);">Waiting for telemetry stream...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM: SRE Agent Report Card (Initially hidden) -->
+        <div id="report-card" class="card report-section">
+            <div class="card-header">
+                <span class="card-title" style="font-size: 1.25rem;"><i class="fa-solid fa-file-invoice"></i> Gemini Autonomous SRE Diagnostic Report</span>
+                <span id="report-ts" style="font-size: 0.8rem; color: var(--text-muted); font-family: 'Fira Code', monospace;"></span>
+            </div>
+            <div class="report-grid">
+                <div class="confidence-circle-container">
+                    <div class="confidence-circle">
+                        <svg>
+                            <defs>
+                                <linearGradient id="cyan-purple-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#38bdf8" />
+                                    <stop offset="100%" stop-color="#a855f7" />
+                                </linearGradient>
+                            </defs>
+                            <circle class="circle-bg" cx="70" cy="70" r="66"></circle>
+                            <circle id="circle-progress" class="circle-progress" cx="70" cy="70" r="66"></circle>
+                        </svg>
+                        <span id="conf-val" class="confidence-value">--%</span>
+                    </div>
+                    <span class="confidence-lbl">Confidence</span>
+                </div>
+                <div class="report-details">
+                    <div>
+                        <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;"><i class="fa-solid fa-circle-info" style="color: var(--neon-blue);"></i> Outage Symptom</h3>
+                        <p id="rep-symptom" style="color: #a9b1d6; font-size: 0.95rem; line-height: 1.5;"></p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;"><i class="fa-solid fa-triangle-exclamation" style="color: var(--neon-red);"></i> Identified Root Cause</h3>
+                        <p id="rep-cause" style="color: #ffffff; font-weight: 500; font-size: 0.95rem; line-height: 1.5;"></p>
+                    </div>
+
+                    <div>
+                        <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.3rem;"><i class="fa-solid fa-diagram-next" style="color: var(--neon-purple);"></i> Propagation Path</h3>
+                        <div id="rep-path" class="causal-path-list">
+                            <!-- Nodes populated dynamically -->
+                        </div>
+                    </div>
+
+                    <div class="remediation-block">
+                        <h4><i class="fa-solid fa-square-terminal"></i> Executable Remediation Actions</h4>
+                        <div id="rep-actions" style="margin-top: 0.6rem; display:flex; flex-direction:column; gap:0.5rem;">
+                            <!-- Remediation actions dynamic -->
+                        </div>
+                    </div>
+
+                    <!-- Code-Level Source Culprit Panel -->
+                    <div id="code-culprit-panel" style="margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1.5rem; display: none;">
+                        <h3 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 0.8rem; display:flex; align-items:center; gap:0.5rem;">
+                            <i class="fa-solid fa-code" style="color: var(--neon-purple);"></i> Code-Level Source Culprit
+                        </h3>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                            <!-- Left: Buggy Source Code -->
+                            <div class="remediation-block" style="border-color: rgba(239, 68, 68, 0.2); background: rgba(239, 68, 68, 0.01);">
+                                <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem; font-size:0.85rem; color:var(--text-muted);">
+                                    <span id="buggy-file-lbl"><i class="fa-solid fa-file-code"></i> services/payment_service.py</span>
+                                    <span id="buggy-func-lbl"><i class="fa-solid fa-cube"></i> capture_charge()</span>
+                                </div>
+                                <pre id="buggy-code-block" style="font-family:'Fira Code', monospace; font-size:0.75rem; color:#f8f8f2; background:rgba(0,0,0,0.35); padding:0.8rem; border-radius:8px; border:1px solid rgba(255,255,255,0.03); overflow-x:auto; line-height:1.4; max-height:220px; white-space:pre-wrap;"></pre>
+                            </div>
+                            <!-- Right: Suggested Git Diff Fix -->
+                            <div class="remediation-block" style="border-color: rgba(16, 185, 129, 0.2); background: rgba(16, 185, 129, 0.01);">
+                                <div style="display:flex; justify-content:space-between; margin-bottom: 0.5rem; font-size:0.85rem; color:var(--text-muted);">
+                                    <span><i class="fa-solid fa-code-compare"></i> RECOMMENDED RESOLUTION</span>
+                                    <span style="color:var(--neon-green); font-weight:600;"><i class="fa-solid fa-check"></i> PROPOSED FIX</span>
+                                </div>
+                                <pre id="diff-code-block" style="font-family:'Fira Code', monospace; font-size:0.75rem; background:rgba(0,0,0,0.35); padding:0.8rem; border-radius:8px; border:1px solid rgba(255,255,255,0.03); overflow-x:auto; line-height:1.4; max-height:220px; text-align:left;"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let updateInterval;
+        let simulation;
+        let svg, mainGroup, linkG, nodeG;
+        
+        let currentNodes = [];
+        let currentLinks = [];
+
+        // Initialize D3 Graph structures with Physics and Zoom
+        function initD3Graph() {
+            svg = d3.select("#graph-canvas");
+            const width = svg.node().getBoundingClientRect().width;
+            const height = 520;
+            
+            svg.selectAll("*").remove(); // Clear previous layouts
+
+            // Setup Zoom and Pan
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 8])
+                .on("zoom", (event) => {
+                    mainGroup.attr("transform", event.transform);
+                });
+            svg.call(zoom);
+
+            // Define Arrow marker
+            svg.append("defs").append("marker")
+                .attr("id", "arrow")
+                .attr("viewBox", "0 -5 10 10")
+                .attr("refX", 18) // Anchor offset from node center
+                .attr("refY", 0)
+                .attr("markerWidth", 5)
+                .attr("markerHeight", 5)
+                .attr("orient", "auto")
+                .append("path")
+                .attr("d", "M0,-4L8,0L0,4")
+                .attr("fill", "rgba(255, 255, 255, 0.2)");
+
+            mainGroup = svg.append("g");
+            linkG = mainGroup.append("g").attr("class", "links");
+            nodeG = mainGroup.append("g").attr("class", "nodes");
+
+            // Setup Physics Engine (tuned for hierarchical clutter reduction)
+            simulation = d3.forceSimulation()
+                .force("link", d3.forceLink().id(d => d.id).distance(d => {
+                    if (d.relationship === "DECLARES") return 20; // Methods stay close to class
+                    if (d.relationship === "IMPORTS") return 120; // Modules push away
+                    return 80; // Standard function calls
+                }))
+                .force("charge", d3.forceManyBody().strength(-120))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collide", d3.forceCollide().radius(d => d.type === "Microservice" || d.type === "DatabaseTable" ? 35 : 20));
+            
+            return { svg, mainGroup };
+        }
+
+        // Render nodes and edges dynamically onto D3 Canvas using Force Layout
+        function updateD3Graph(codebase, telemetryNodes) {
+            // Build unified nodes array
+            const nodesMap = new Map();
+            
+            // 1. Load structural codebase nodes
+            codebase.nodes.forEach(n => {
+                // Keep physics state (x,y) if node already exists
+                const existing = currentNodes.find(cn => cn.id === n.id);
+                
+                // Fuzzy match with live telemetry if labels match (e.g., 'Database' === 'Database')
+                let tel = telemetryNodes[n.label] || { request_count: 0, avg_latency_ms: 0, error_rate_percent: 0, anomalous: false };
+                
+                nodesMap.set(n.id, {
+                    ...n,
+                    ...tel,
+                    x: existing ? existing.x : undefined,
+                    y: existing ? existing.y : undefined,
+                    vx: existing ? existing.vx : undefined,
+                    vy: existing ? existing.vy : undefined
+                });
+            });
+
+            // 2. Overlay any live telemetry nodes that didn't perfectly match static codebase AST
+            Object.keys(telemetryNodes).forEach(k => {
+                let found = false;
+                nodesMap.forEach(v => { if (v.label === k) found = true; });
+                if (!found) {
+                    const existing = currentNodes.find(cn => cn.id === k);
+                    nodesMap.set(k, {
+                        id: k,
+                        label: k,
+                        type: "LiveTelemetry",
+                        ...telemetryNodes[k],
+                        x: existing ? existing.x : undefined,
+                        y: existing ? existing.y : undefined
+                    });
+                }
+            });
+
+            currentNodes = Array.from(nodesMap.values());
+
+            // Build links and filter broken/dangling edges
+            currentLinks = codebase.edges.map(e => ({
+                source: e.source,
+                target: e.target,
+                relationship: e.relationship
+            })).filter(l => nodesMap.has(l.source) && nodesMap.has(l.target));
+
+            // -- Update D3 Elements --
+            
+            // 1. Draw Links
+            const linkSelection = linkG.selectAll(".link-line")
+                .data(currentLinks, d => `${d.source.id || d.source}-${d.target.id || d.target}-${d.relationship}`);
+                
+            linkSelection.exit().remove();
+            
+            const linkEnter = linkSelection.enter().append("line")
+                .attr("class", "link-line")
+                .attr("stroke", "rgba(255, 255, 255, 0.1)")
+                .attr("stroke-width", 1.5)
+                .attr("marker-end", "url(#arrow)");
+                
+            const link = linkEnter.merge(linkSelection);
+
+            // 2. Draw Nodes
+            const nodeSelection = nodeG.selectAll(".node-group")
+                .data(currentNodes, d => d.id);
+                
+            nodeSelection.exit().remove();
+            
+            const nodeEnter = nodeSelection.enter().append("g")
+                .attr("class", "node-group")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            nodeEnter.append("circle")
+                .attr("r", d => d.type === "Microservice" || d.type === "DatabaseTable" ? 22 : 12)
+                .attr("stroke-width", 2);
+                
+            nodeEnter.append("text")
+                .attr("class", "node-label")
+                .attr("y", d => d.type === "Microservice" || d.type === "DatabaseTable" ? 34 : 24)
+                .attr("text-anchor", "middle")
+                .attr("fill", "var(--text-main)")
+                .attr("font-size", d => d.type === "Microservice" || d.type === "DatabaseTable" ? "0.8rem" : "0.6rem")
+                .attr("pointer-events", "none");
+                
+            nodeEnter.append("text")
+                .attr("class", "fa-icon")
+                .attr("y", 4)
+                .attr("text-anchor", "middle")
+                .attr("font-family", "FontAwesome")
+                .attr("font-size", d => d.type === "Microservice" || d.type === "DatabaseTable" ? "1.1rem" : "0.7rem")
+                .attr("pointer-events", "none");
+
+            const node = nodeEnter.merge(nodeSelection);
+            
+            // Node Color Logic based on Type and Error State
+            node.select("circle")
+                .attr("fill", d => {
+                    if (d.error_rate_percent > 10.0) return "rgba(239, 68, 68, 0.15)";
+                    if (d.avg_latency_ms > 500.0) return "rgba(245, 158, 11, 0.15)";
+                    if (d.type === "Microservice") return "rgba(56, 189, 248, 0.1)";
+                    if (d.type === "DatabaseTable") return "rgba(16, 185, 129, 0.1)";
+                    if (d.type === "Module") return "rgba(168, 85, 247, 0.05)";
+                    return "rgba(255, 255, 255, 0.05)";
+                })
+                .attr("stroke", d => {
+                    if (d.error_rate_percent > 10.0) return "var(--neon-red)";
+                    if (d.avg_latency_ms > 500.0) return "var(--neon-amber)";
+                    if (d.type === "Microservice") return "var(--neon-blue)";
+                    if (d.type === "DatabaseTable") return "var(--neon-green)";
+                    if (d.type === "Operation") return "var(--neon-purple)";
+                    return "rgba(255, 255, 255, 0.2)";
+                })
+                .style("filter", d => {
+                    return (d.anomalous || d.error_rate_percent > 10.0 || d.avg_latency_ms > 500.0) 
+                        ? `drop-shadow(0 0 8px ${d.error_rate_percent > 10.0 ? "var(--neon-red)" : "var(--neon-amber)"})` 
+                        : "none";
+                });
+                
+            // Update labels and icons
+            node.select(".node-label").text(d => d.label);
+            node.select(".fa-icon")
+                .attr("fill", d => {
+                    if (d.error_rate_percent > 10.0) return "var(--neon-red)";
+                    if (d.avg_latency_ms > 500.0) return "var(--neon-amber)";
+                    if (d.type === "Module") return "rgba(255, 255, 255, 0.3)";
+                    return "rgba(255, 255, 255, 0.7)";
+                })
+                .text(d => {
+                    if (d.error_rate_percent > 10.0) return "\uf057"; // x-circle
+                    if (d.avg_latency_ms > 500.0) return "\uf071"; // warning
+                    if (d.type === "Microservice") return "\uf1b2"; // cube
+                    if (d.type === "DatabaseTable") return "\uf1c0"; // database
+                    if (d.type === "Operation") return "\uf121"; // code
+                    if (d.type === "Module") return "\uf02d"; // book
+                    return "\uf111"; // circle
+                });
+
+            // Feed simulation data and start engine
+            simulation.nodes(currentNodes).on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+                node.attr("transform", d => `translate(${d.x}, ${d.y})`);
+            });
+            simulation.force("link").links(currentLinks);
+            simulation.alpha(0.3).restart();
+        }
+
+        // D3 Drag physics bindings
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // Fetch metrics, call logs, and construct the D3 dashboard
+        async function fetchTelemetry() {
+            try {
+                const res = await fetch("/api/telemetry");
+                const data = await res.json();
+                
+                if (data.error) return;
+
+                // Update Mini Metrics
+                const traceList = Object.values(data.nodes);
+                const totalTraces = traceList.length > 0 ? traceList[0].request_count : 0;
+                document.getElementById("metric-traces").textContent = totalTraces;
+
+                const gwNode = data.nodes["Gateway"];
+                const gwLatency = gwNode ? `${gwNode.avg_latency_ms}ms` : "--";
+                document.getElementById("metric-latency").textContent = gwLatency;
+
+                // Update JIT Graph Map dynamically injecting codebase topology overlaid with telemetry
+                if (data.codebase && data.codebase.nodes) {
+                    updateD3Graph(data.codebase, data.nodes);
+                }
+
+                // Update Sieved Terminal Logs
+                const term = document.getElementById("terminal");
+                if (data.logs.length === 0) {
+                    term.innerHTML = `<div style="color: var(--text-muted); font-style:italic;">No warning/error logs sieved. Operations within standard baseline constraints.</div>`;
+                } else {
+                    term.innerHTML = data.logs.map(log => `
+                        <div class="log-line">
+                            <span class="log-service">[${log.service}]</span>
+                            <span class="log-lvl ${log.level}">${log.level}</span>
+                            <span class="log-msg">${log.message}</span>
+                            <span class="log-time">x${log.count}</span>
+                        </div>
+                    `).join("");
+                }
+            } catch (err) {
+                console.error("Error fetching telemetry:", err);
+            }
+        }
+
+        // (Chaos injector removed entirely)
+
+        // Trigger SRE Agent reasoning
+        async function triggerDiagnosis() {
+            const btn = document.getElementById("agent-btn");
+            const queryBox = document.getElementById("agent-query-input");
+            const userQuery = queryBox.value || "Analyze the codebase for bottlenecks.";
+            
+            const ollamaUrl = document.getElementById("ollama-url").value;
+            const ollamaModel = document.getElementById("ollama-model").value;
+            const geminiKey = document.getElementById("gemini-key").value;
+            
+            btn.classList.add("scanning");
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Reasoning GraphRAG paths...`;
+
+            // Hide previous report
+            document.getElementById("report-card").style.display = "none";
+
+            try {
+                const res = await fetch("/api/analyze", { 
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        query: userQuery,
+                        ollama_url: ollamaUrl,
+                        ollama_model: ollamaModel,
+                        gemini_api_key: geminiKey
+                    })
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    alert("Reasoning failed: " + data.error);
+                    return;
+                }
+
+                const analysis = data.analysis;
+                
+                // Set text outputs
+                document.getElementById("rep-symptom").textContent = analysis.incident_summary;
+                document.getElementById("rep-cause").textContent = `${analysis.suspected_root_cause}`;
+                document.getElementById("report-ts").textContent = `GENERATED: ${new Date().toLocaleTimeString()}`;
+
+                // Set causal chain arrows
+                const pathG = document.getElementById("rep-path");
+                pathG.innerHTML = "";
+                
+                const chain = analysis.causal_chain || [];
+                chain.forEach((strPath) => {
+                    const steps = strPath.split(" -> ");
+                    steps.forEach((step, idx) => {
+                        const cleanStep = step.replace(" (outage origin)", "").replace(" 🛑", "");
+                        const isOrigin = idx === steps.length - 1;
+                        
+                        const nodeSpan = document.createElement("span");
+                        nodeSpan.className = `causal-node ${isOrigin ? 'origin' : ''}`;
+                        nodeSpan.textContent = step;
+                        pathG.appendChild(nodeSpan);
+
+                        if (idx < steps.length - 1) {
+                            const arrowSpan = document.createElement("span");
+                            arrowSpan.className = "causal-arrow";
+                            arrowSpan.innerHTML = `<i class="fa-solid fa-circle-chevron-right"></i>`;
+                            pathG.appendChild(arrowSpan);
+                        }
+                    });
+                });
+
+                // Set Actionable Remediations terminal list
+                const actionsG = document.getElementById("rep-actions");
+                actionsG.innerHTML = "";
+                
+                const actions = analysis.remediation_actions || [];
+                if (actions.length === 0) {
+                    actionsG.innerHTML = `<div style="color: var(--text-muted); font-style:italic;">No remediation required. Service is functional.</div>`;
+                } else {
+                    actions.forEach((act) => {
+                        const actDiv = document.createElement("div");
+                        actDiv.className = "remediation-item";
+                        actDiv.innerHTML = `
+                            <span>$ ${act}</span>
+                            <button onclick="navigator.clipboard.writeText('${act.replace(/'/g, "\\'")}')" title="Copy to clipboard">
+                                <i class="fa-regular fa-copy"></i>
+                            </button>
+                        `;
+                        actionsG.appendChild(actDiv);
+                    });
+                }
+
+                // Animate confidence progress wheel
+                const conf = analysis.confidence_score || 0;
+                document.getElementById("conf-val").textContent = `${conf}%`;
+                
+                // Dash offset formula: (perimeter - (percent * perimeter))
+                const dashoffset = 414 - (conf / 100 * 414);
+                document.getElementById("circle-progress").style.strokeDashoffset = dashoffset;
+
+                // Map Code Culprit source details
+                const buggyFile = analysis.buggy_file || "";
+                const buggyFunction = analysis.buggy_function || "";
+                const buggyCode = analysis.buggy_code_lines || "";
+                const gitDiff = analysis.suggested_git_diff || "";
+
+                if (buggyFile) {
+                    document.getElementById("buggy-file-lbl").innerHTML = `<i class="fa-solid fa-file-code" style="color: var(--neon-red); margin-right: 4px;"></i> ${buggyFile}`;
+                    document.getElementById("buggy-func-lbl").innerHTML = `<i class="fa-solid fa-cube" style="color: var(--neon-purple); margin-right: 4px;"></i> ${buggyFunction}`;
+                    document.getElementById("buggy-code-block").textContent = buggyCode;
+                    
+                    const diffBlock = document.getElementById("diff-code-block");
+                    diffBlock.innerHTML = "";
+                    
+                    const diffLines = gitDiff.split("\n");
+                    diffLines.forEach(line => {
+                        const lineDiv = document.createElement("div");
+                        lineDiv.style.padding = "2px 4px";
+                        lineDiv.style.borderRadius = "2px";
+                        if (line.startsWith("-")) {
+                            lineDiv.style.color = "#ff5555";
+                            lineDiv.style.background = "rgba(239, 68, 68, 0.1)";
+                        } else if (line.startsWith("+")) {
+                            lineDiv.style.color = "#50fa7b";
+                            lineDiv.style.background = "rgba(16, 185, 129, 0.1)";
+                        } else if (line.startsWith("@")) {
+                            lineDiv.style.color = "#bd93f9";
+                        } else {
+                            lineDiv.style.color = "#f8f8f2";
+                        }
+                        lineDiv.textContent = line;
+                        diffBlock.appendChild(lineDiv);
+                    });
+                    
+                    document.getElementById("code-culprit-panel").style.display = "block";
+                } else {
+                    document.getElementById("code-culprit-panel").style.display = "none";
+                }
+
+                // Show report card container
+                document.getElementById("report-card").style.display = "block";
+                document.getElementById("report-card").scrollIntoView({ behavior: "smooth" });
+
+            } catch (err) {
+                console.error("Diagnosis error:", err);
+                alert("Agent query failed. Ensure backend and Ollama/Gemini are running.");
+            } finally {
+                btn.classList.remove("scanning");
+                btn.innerHTML = `<i class="fa-solid fa-brain"></i> Ask Agent`;
+            }
+        }
+
+        // Reset database records
+        async function resetSystem() {
+            if (!confirm("Are you sure you want to wipe all transaction records inside telemetry.db?")) return;
+            try {
+                await fetch("/api/reset", { method: "POST" });
+                // Reset UI to standard state
+                injectChaos("none");
+                document.getElementById("report-card").style.display = "none";
+            } catch (err) {
+                console.error("Error resetting database:", err);
+            }
+        }
+
+        // Initialize script
+        window.addEventListener("load", () => {
+            d3Graph = initD3Graph();
+            fetchTelemetry();
+
+            // Set running interval
+            updateInterval = setInterval(fetchTelemetry, 3000);
+        });
+    </script>
+</body>
+</html>

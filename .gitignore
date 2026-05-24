@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+telemetry.db
+test_repo/
+.env
