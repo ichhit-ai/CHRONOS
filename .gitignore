@@ -3,3 +3,6 @@ __pycache__/
 telemetry.db
 test_repo/
 .env
+.tmp_repos/
+test_upload.py
+chaos_state.json

@@ -201,12 +201,13 @@ def get_codebase_blueprint():
                     print(f"Error reading codebase file {filepath}: {e}")
     return blueprint
 
-def analyze_incident(graph_data, user_query="Analyze the codebase for bottlenecks.", ollama_url_override="", ollama_model_override="", gemini_key_override=""):
+def analyze_incident(graph_data, user_query="Analyze the codebase for bottlenecks.", ollama_url_override="", ollama_model_override="", api_key_override="", api_model_override=""):
     """
     Sends the dynamically constructed graph telemetry AND the local codebase 
-    files AND the static codebase graph to a local Ollama model (or Gemini) for reasoning.
+    files AND the static codebase graph to a local Ollama model or a remote API (OpenRouter/OpenAI compatible) for reasoning.
     """
-    api_key = gemini_key_override if gemini_key_override else os.environ.get("GEMINI_API_KEY")
+    api_key = api_key_override if api_key_override else os.environ.get("API_KEY")
+    api_model = api_model_override if api_model_override else os.environ.get("API_MODEL")
     ollama_url = ollama_url_override if ollama_url_override else os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
     ollama_model = ollama_model_override if ollama_model_override else os.environ.get("OLLAMA_MODEL", "llama3")
     
@@ -258,8 +259,19 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
     Ensure your output is ONLY the raw JSON string, starting with {{ and ending with }}. Do not wrap it in markdown codeblocks.
     """
 
-    if api_key:
-        # Use Gemini
+    headers = {"Content-Type": "application/json"}
+    
+    if api_key and api_model:
+        # Use OpenRouter/OpenAI compatible API
+        print(f"Routing to Remote API ({api_model})...")
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        payload = {
+            "model": api_model,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        headers["Authorization"] = f"Bearer {api_key}"
+    elif api_key:
+        # Fallback for Gemini SDK API directly (if they only gave key)
         print("Routing to Gemini API...")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         payload = {
@@ -280,14 +292,16 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST"
     )
 
     try:
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=60) as response:
             res_body = json.loads(response.read().decode("utf-8"))
-            if api_key:
+            if api_key and api_model:
+                raw_text = res_body["choices"][0]["message"]["content"]
+            elif api_key:
                 raw_text = res_body["candidates"][0]["content"]["parts"][0]["text"]
             else:
                 raw_text = res_body["response"]

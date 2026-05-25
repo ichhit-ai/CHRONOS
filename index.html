@@ -561,8 +561,58 @@
     </header>
 
     <div class="dashboard-container">
-        <!-- LEFT: Agent Query panel -->
-        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+        <!-- LEFT: Agent Query panel & Data Management -->
+        <div style="display: flex; flex-direction: column; gap: 1rem; min-width: 300px; max-width: 380px;">
+            
+            <!-- Data Management Panel -->
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div class="card-header">
+                        <span class="card-title"><i class="fa-solid fa-database"></i> Data Management</span>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px;">
+                            <span style="font-size: 0.75rem; color: var(--neon-blue); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-brands fa-github"></i> Index GitHub Repo</span>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="text" id="github-url" placeholder="https://github.com/..." style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem;">
+                                <button id="github-btn" onclick="cloneGithub()" style="background: var(--neon-blue); color: #000; border: none; border-radius: 4px; padding: 0 0.8rem; font-weight: 600; cursor: pointer; font-size: 0.8rem;"><i class="fa-solid fa-cloud-arrow-down"></i></button>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px;">
+                            <span style="font-size: 0.75rem; color: var(--neon-blue); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-solid fa-folder-open"></i> Upload Local Folder</span>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="file" id="folder-upload" webkitdirectory directory multiple style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.4rem; font-size: 0.7rem;">
+                                <button id="upload-btn" onclick="uploadFolder()" style="background: var(--neon-blue); color: #000; border: none; border-radius: 4px; padding: 0 0.8rem; font-weight: 600; cursor: pointer; font-size: 0.8rem;"><i class="fa-solid fa-upload"></i></button>
+                            </div>
+                            <div id="upload-progress-bg" style="display:none; height: 4px; background: rgba(255,255,255,0.1); margin-top: 8px; border-radius: 2px; overflow: hidden;">
+                                <div id="upload-progress-bar" style="height: 100%; width: 0%; background: var(--neon-blue); transition: width 0.1s;"></div>
+                            </div>
+                        </div>
+
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px;">
+                            <span style="font-size: 0.75rem; color: var(--neon-green); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-solid fa-diagram-project"></i> Generate Topology</span>
+                            <button id="index-btn" onclick="indexGraph()" style="width: 100%; background: transparent; border: 1px solid var(--neon-green); color: var(--neon-green); border-radius: 4px; padding: 0.5rem; font-weight: 600; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;">Index AST Graph</button>
+                        </div>
+
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); padding: 0.8rem; border-radius: 8px;">
+                            <span style="font-size: 0.75rem; color: var(--neon-purple); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-solid fa-bolt"></i> Simulate APM Traffic</span>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <select id="sim-mode" style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem;">
+                                    <option value="none">Standard Traffic</option>
+                                    <option value="database_slowdown">Database Slowdown</option>
+                                    <option value="payment_gateway_down">Payment Timeout</option>
+                                    <option value="auth_leak">Auth Token Leak</option>
+                                </select>
+                                <button id="sim-btn" onclick="simulateTraffic()" style="background: var(--neon-purple); color: #fff; border: none; border-radius: 4px; padding: 0 0.8rem; font-weight: 600; cursor: pointer; font-size: 0.8rem;">Run</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent Query Panel -->
+            <div class="card" style="display: flex; flex-direction: column; justify-content: space-between; flex: 1;">
             <div>
                 <div class="card-header">
                     <span class="card-title"><i class="fa-solid fa-terminal"></i> GraphRAG Agent</span>
@@ -577,7 +627,8 @@
                         <span style="font-size: 0.75rem; color: var(--neon-blue); font-weight: 600; margin-bottom: 0.5rem; display: block;"><i class="fa-solid fa-gear"></i> LLM Configuration (Optional)</span>
                         <input type="text" id="ollama-url" value="http://localhost:11434/api/generate" placeholder="Ollama URL" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem; margin-bottom: 0.4rem;">
                         <input type="text" id="ollama-model" value="llama3" placeholder="Ollama Model" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem; margin-bottom: 0.4rem;">
-                        <input type="password" id="gemini-key" placeholder="Gemini API Key (overrides Ollama)" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem;">
+                        <input type="text" id="api-key" placeholder="OpenRouter / Gemini API Key" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem; margin-bottom: 0.4rem;">
+                        <input type="text" id="api-model" placeholder="API Model (e.g. google/gemini-1.5-flash)" style="width: 100%; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; color: var(--text-main); padding: 0.5rem; font-size: 0.8rem;">
                         <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic;">Note: If using local Ollama, ensure you run `ollama serve` and provide a downloaded model name.</p>
                     </div>
                 </div>
@@ -586,6 +637,7 @@
             <button id="agent-btn" class="trigger-agent-btn" onclick="triggerDiagnosis()">
                 <i class="fa-solid fa-brain"></i> Ask Agent
             </button>
+        </div>
         </div>
 
         <!-- CENTER: Call Graph Canvas -->
@@ -974,6 +1026,135 @@
         // (Chaos injector removed entirely)
 
         // Trigger SRE Agent reasoning
+        async function cloneGithub() {
+            const url = document.getElementById("github-url").value;
+            if (!url) return alert("Please enter a GitHub URL");
+            
+            const btn = document.getElementById("github-btn");
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+            try {
+                const res = await fetch("/api/repo/github", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url })
+                });
+                if (res.ok) {
+                    alert("Repository cloned successfully! Please click 'Index AST Graph' to build the topology.");
+                } else {
+                    const err = await res.json();
+                    alert("Error: " + err.detail);
+                }
+            } catch (e) {
+                alert("Failed to clone: " + e);
+            } finally {
+                btn.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i>`;
+            }
+        }
+
+        function uploadFolder() {
+            const input = document.getElementById("folder-upload");
+            if (!input.files.length) return alert("Please select a folder");
+            
+            const btn = document.getElementById("upload-btn");
+            const progBg = document.getElementById("upload-progress-bg");
+            const progBar = document.getElementById("upload-progress-bar");
+            
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+            progBg.style.display = "block";
+            progBar.style.width = "0%";
+            
+            const formData = new FormData();
+            for (let i = 0; i < input.files.length; i++) {
+                const file = input.files[i];
+                formData.append("files", file);
+                formData.append("paths", file.webkitRelativePath || file.name);
+            }
+            
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/repo/upload", true);
+            
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    progBar.style.width = percentComplete + "%";
+                }
+            };
+            
+            xhr.onload = function() {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    alert("Folder uploaded successfully! Please click 'Index AST Graph' to build the topology.");
+                    progBg.style.display = "none";
+                } else {
+                    try {
+                        const err = JSON.parse(xhr.responseText);
+                        alert("Error: " + err.detail);
+                    } catch(e) {
+                        alert("Error uploading folder.");
+                    }
+                }
+                btn.innerHTML = `<i class="fa-solid fa-upload"></i>`;
+            };
+            
+            xhr.onerror = function() {
+                alert("Failed to upload due to network error.");
+                btn.innerHTML = `<i class="fa-solid fa-upload"></i>`;
+            };
+            
+            xhr.send(formData);
+        }
+
+        async function indexGraph() {
+            const btn = document.getElementById("index-btn");
+            const originalText = btn.innerText;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Indexing Codebase...`;
+            btn.style.background = "var(--neon-green)";
+            btn.style.color = "#000";
+            
+            try {
+                const res = await fetch("/api/repo/index", { method: "POST" });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    const err = await res.json();
+                    alert("Error: " + err.detail);
+                    btn.innerHTML = originalText;
+                    btn.style.background = "transparent";
+                    btn.style.color = "var(--neon-green)";
+                }
+            } catch (e) {
+                alert("Failed to index: " + e);
+                btn.innerHTML = originalText;
+                btn.style.background = "transparent";
+                btn.style.color = "var(--neon-green)";
+            }
+        }
+
+        async function simulateTraffic() {
+            const mode = document.getElementById("sim-mode").value;
+            const btn = document.getElementById("sim-btn");
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+            try {
+                const res = await fetch("/api/simulate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ minutes: 10, mode: mode })
+                });
+                if (res.ok) {
+                    alert("10 minutes of generic codebase-aware APM traffic simulated successfully!");
+                    window.location.reload();
+                } else {
+                    const err = await res.json();
+                    alert("Error: " + err.detail);
+                }
+            } catch (e) {
+                alert("Failed to simulate: " + e);
+            } finally {
+                btn.innerHTML = `Run`;
+            }
+        }
+
+
+
         async function triggerDiagnosis() {
             const btn = document.getElementById("agent-btn");
             const queryBox = document.getElementById("agent-query-input");
@@ -981,7 +1162,8 @@
             
             const ollamaUrl = document.getElementById("ollama-url").value;
             const ollamaModel = document.getElementById("ollama-model").value;
-            const geminiKey = document.getElementById("gemini-key").value;
+            const apiKey = document.getElementById("api-key").value;
+            const apiModel = document.getElementById("api-model").value;
             
             btn.classList.add("scanning");
             btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Reasoning GraphRAG paths...`;
@@ -997,16 +1179,11 @@
                         query: userQuery,
                         ollama_url: ollamaUrl,
                         ollama_model: ollamaModel,
-                        gemini_api_key: geminiKey
+                        api_key: apiKey,
+                        api_model: apiModel
                     })
                 });
                 const data = await res.json();
-
-                if (data.error) {
-                    alert("Reasoning failed: " + data.error);
-                    return;
-                }
-
                 const analysis = data.analysis;
                 
                 // Set text outputs
@@ -1125,9 +1302,8 @@
             if (!confirm("Are you sure you want to wipe all transaction records inside telemetry.db?")) return;
             try {
                 await fetch("/api/reset", { method: "POST" });
-                // Reset UI to standard state
-                injectChaos("none");
-                document.getElementById("report-card").style.display = "none";
+                alert("Database and downloaded repos successfully wiped.");
+                window.location.reload();
             } catch (err) {
                 console.error("Error resetting database:", err);
             }

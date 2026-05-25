@@ -8,23 +8,86 @@ import json
 import argparse
 from datetime import datetime, timedelta
 
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from opentelemetry.trace import Status, StatusCode
+from opentelemetry.sdk.resources import Resource
+
 DB_PATH = "telemetry.db"
 SCHEMA_PATH = "schema.sql"
 STATE_PATH = "chaos_state.json"
 
-SERVICES = ["Gateway", "Auth", "Checkout", "Inventory", "Payment", "Database"]
+# --- Custom OpenTelemetry Exporter ---
+class ChronosSQLiteExporter(SpanExporter):
+    def __init__(self, db_path):
+        self.db_path = db_path
 
-# Normal execution baselines (mean latency, std dev)
-BASELINES = {
-    "Auth": (15, 3),
-    "Checkout": (35, 5),
-    "Inventory": (45, 8),
-    "Payment": (120, 15),
-    "Database": (8, 2)
-}
+    def export(self, spans):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("BEGIN TRANSACTION")
+        try:
+            for span in spans:
+                trace_id = format(span.context.trace_id, '032x')
+                span_id = format(span.context.span_id, '016x')
+                parent_id = format(span.parent.span_id, '016x') if span.parent else None
+                
+                service = span.attributes.get("service", span.resource.attributes.get("service.name", "Unknown"))
+                endpoint = span.attributes.get("endpoint", span.name)
+                
+                duration_ms = (span.end_time - span.start_time) / 1e6
+                
+                status_code = 500 if span.status.status_code == StatusCode.ERROR else 200
+                if "http.status_code" in span.attributes:
+                    status_code = span.attributes["http.status_code"]
+                    
+                timestamp = datetime.fromtimestamp(span.start_time / 1e9)
+                
+                cursor.execute(
+                    """
+                    INSERT INTO traces (trace_id, span_id, parent_span_id, service, endpoint, duration_ms, status_code, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (trace_id, span_id, parent_id, service, endpoint, int(duration_ms), int(status_code), timestamp.strftime('%Y-%m-%d %H:%M:%f'))
+                )
+                
+                # Export Events as Logs
+                for event in span.events:
+                    level = event.attributes.get("level", "INFO")
+                    evt_time = datetime.fromtimestamp(event.timestamp / 1e9)
+                    cursor.execute(
+                        """
+                        INSERT INTO logs (service, level, message, trace_id, timestamp)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (service, level, event.name, trace_id, evt_time.strftime('%Y-%m-%d %H:%M:%f'))
+                    )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"Failed to export spans: {e}")
+        finally:
+            conn.close()
+            
+        from opentelemetry.sdk.trace.export import SpanExportResult
+        return SpanExportResult.SUCCESS
 
+    def shutdown(self):
+        pass
+
+# Initialize OpenTelemetry
+resource = Resource(attributes={"service.name": "simulator"})
+provider = TracerProvider(resource=resource)
+exporter = ChronosSQLiteExporter(DB_PATH)
+# Use BatchSpanProcessor for huge performance gains
+provider.add_span_processor(BatchSpanProcessor(exporter, max_export_batch_size=512))
+trace.set_tracer_provider(provider)
+tracer = trace.get_tracer(__name__)
+
+# --- Database & State Init ---
 def init_db(force=False):
-    """Initializes the SQLite database with the schema."""
     if force and os.path.exists(DB_PATH):
         os.remove(DB_PATH)
         print("Existing database removed.")
@@ -42,12 +105,9 @@ def init_db(force=False):
 
     conn.commit()
     conn.close()
-
-    # Initialize chaos state
     set_chaos_state("none")
 
 def get_chaos_state():
-    """Reads the current active failure mode."""
     if not os.path.exists(STATE_PATH):
         return "none"
     try:
@@ -58,30 +118,13 @@ def get_chaos_state():
         return "none"
 
 def set_chaos_state(mode):
-    """Sets a new active failure mode."""
     with open(STATE_PATH, "w") as f:
         json.dump({"mode": mode, "updated_at": str(datetime.now())}, f)
     print(f"Chaos state updated to: {mode}")
 
-def write_trace(cursor, trace_id, span_id, parent_id, service, endpoint, duration, status, timestamp):
-    cursor.execute(
-        """
-        INSERT INTO traces (trace_id, span_id, parent_span_id, service, endpoint, duration_ms, status_code, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (trace_id, span_id, parent_id, service, endpoint, int(duration), int(status), timestamp.strftime('%Y-%m-%d %H:%M:%f'))
-    )
-
-def write_log(cursor, service, level, message, trace_id, timestamp):
-    cursor.execute(
-        """
-        INSERT INTO logs (service, level, message, trace_id, timestamp)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (service, level, message, trace_id, timestamp.strftime('%Y-%m-%d %H:%M:%f'))
-    )
-
-def write_metric(cursor, service, name, value, timestamp):
+def write_metric(service, name, value, timestamp):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
     cursor.execute(
         """
         INSERT INTO metrics (service, metric_name, value, timestamp)
@@ -89,182 +132,177 @@ def write_metric(cursor, service, name, value, timestamp):
         """,
         (service, name, float(value), timestamp.strftime('%Y-%m-%d %H:%M:%f'))
     )
+    conn.commit()
+    conn.close()
 
-def simulate_request(conn, timestamp=None):
-    """Simulates a single complete transaction path with logs, metrics, and traces."""
+# --- Dynamic Graph Loading ---
+def load_graph_topology():
+    if not os.path.exists(DB_PATH):
+        return None, None
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, label, type FROM codebase_nodes WHERE type IN ('Microservice', 'Operation')")
+        nodes = {row[0]: {"label": row[1], "type": row[2]} for row in cursor.fetchall()}
+        
+        cursor.execute("SELECT source, target FROM codebase_edges")
+        edges = {}
+        for src, tgt in cursor.fetchall():
+            edges.setdefault(src, []).append(tgt)
+        conn.close()
+        return nodes, edges
+    except Exception:
+        return None, None
+
+_CACHED_NODES = None
+_CACHED_EDGES = None
+
+# --- Simulation Logic ---
+def simulate_request(timestamp=None):
+    """Simulates a complete transaction using dynamic codebase AST topologies."""
+    global _CACHED_NODES, _CACHED_EDGES
     if timestamp is None:
         timestamp = datetime.now()
 
-    cursor = conn.cursor()
-    trace_id = str(uuid.uuid4())
+    if _CACHED_NODES is None:
+        _CACHED_NODES, _CACHED_EDGES = load_graph_topology()
+
     failure_mode = get_chaos_state()
-
-    # 1. Gateway Span (Parent Span)
-    gateway_span = str(uuid.uuid4())
-    gw_start = timestamp
     
-    # 2. Auth Span
-    auth_span = str(uuid.uuid4())
-    auth_latency = random.normalvariate(*BASELINES["Auth"])
-    auth_status = 200
-    
-    # Inject Failure Mode: auth_leak (creates latency & token failures)
-    if failure_mode == "auth_leak":
-        auth_latency = random.uniform(800, 1500) # Auth slowdown
-        if random.random() < 0.15:
-            auth_status = 401 # Unauthorized leaks
+    # Check if we have a valid custom codebase graph to simulate on
+    if _CACHED_NODES and len(_CACHED_NODES) > 0:
+        # Generate Dynamic Trace Walk based on AST Codebase
+        entry_node_id = random.choice(list(_CACHED_NODES.keys()))
+        path = [entry_node_id]
+        current = entry_node_id
+        # Walk up to 4 layers deep to simulate a real call stack
+        for _ in range(random.randint(1, 4)):
+            if _CACHED_EDGES and current in _CACHED_EDGES and _CACHED_EDGES[current]:
+                next_node = random.choice(_CACHED_EDGES[current])
+                if next_node in _CACHED_NODES:
+                    path.append(next_node)
+                    current = next_node
+                else:
+                    break
+            else:
+                break
+                
+        def run_span(node_idx, current_time_ns):
+            node_id = path[node_idx]
+            node_label = _CACHED_NODES[node_id]["label"]
+            
+            latency = random.uniform(5, 25)
+            status = 200
+            is_failing = False
+            
+            if failure_mode != "none":
+                # Inject failure at the leaf of the stack
+                if node_idx == len(path) - 1 and random.random() < 0.25:
+                    latency = random.uniform(800, 3000)
+                    status = 500
+                    is_failing = True
 
-    auth_timestamp = gw_start + timedelta(milliseconds=2)
-    write_trace(cursor, trace_id, auth_span, gateway_span, "Auth", "/v1/auth/verify", auth_latency, auth_status, auth_timestamp)
-    write_log(cursor, "Auth", "INFO", "Verifying JWT auth header", trace_id, auth_timestamp)
-    
-    if auth_status == 401:
-        write_log(cursor, "Auth", "ERROR", "Token signature validation failed - unauthorized access attempt", trace_id, auth_timestamp + timedelta(milliseconds=auth_latency))
-        # Gateway fails early
-        write_trace(cursor, trace_id, gateway_span, None, "Gateway", "/checkout", auth_latency + 5, 401, gw_start)
-        write_log(cursor, "Gateway", "WARNING", "Request terminated at Gateway due to Auth validation failure", trace_id, gw_start + timedelta(milliseconds=auth_latency))
-        return
+            start_ns = current_time_ns
+            with tracer.start_as_current_span(node_label, start_time=start_ns, end_on_exit=False) as span:
+                span.set_attribute("service", node_label)
+                span.set_attribute("endpoint", f"/{node_label.replace('.', '/')}")
+                span.set_attribute("http.status_code", status)
+                
+                if is_failing:
+                    span.add_event(f"CRITICAL: Application threw unhandled exception during {node_label} due to {failure_mode}", timestamp=start_ns, attributes={"level": "ERROR"})
+                    span.set_status(Status(StatusCode.ERROR))
+                else:
+                    span.add_event(f"Executing {node_label} successfully", timestamp=start_ns, attributes={"level": "INFO"})
+                
+                child_end_ns = start_ns + int(latency * 1e6)
+                if node_idx < len(path) - 1:
+                    child_end_ns = run_span(node_idx + 1, child_end_ns)
+                    
+                end_ns = child_end_ns + int(random.uniform(1, 5) * 1e6)
+                
+                if is_failing and node_idx < len(path) - 1:
+                    # Propagate error up the stack
+                    span.add_event(f"Failed waiting on downstream call inside {node_label}", timestamp=end_ns, attributes={"level": "WARNING"})
+                    span.set_status(Status(StatusCode.ERROR))
+                    span.set_attribute("http.status_code", 500)
+                    
+                span.end(end_time=end_ns)
+                return end_ns
 
-    write_log(cursor, "Auth", "INFO", "Auth verified successfully", trace_id, auth_timestamp + timedelta(milliseconds=auth_latency))
-
-    # 3. Checkout Span
-    checkout_span = str(uuid.uuid4())
-    chk_start = auth_timestamp + timedelta(milliseconds=auth_latency + 1)
-    
-    # 4. Inventory Span
-    inv_span = str(uuid.uuid4())
-    inv_latency = random.normalvariate(*BASELINES["Inventory"])
-    inv_status = 200
-    write_trace(cursor, trace_id, inv_span, checkout_span, "Inventory", "/v1/inventory/deduct", inv_latency, inv_status, chk_start + timedelta(milliseconds=2))
-    write_log(cursor, "Inventory", "INFO", "Deducting stock for item SKU-8842", trace_id, chk_start + timedelta(milliseconds=2))
-    write_log(cursor, "Inventory", "INFO", "Stock successfully deducted", trace_id, chk_start + timedelta(milliseconds=inv_latency))
-
-    # 5. Payment Span
-    pay_span = str(uuid.uuid4())
-    pay_start = chk_start + timedelta(milliseconds=inv_latency + 3)
-    pay_latency = random.normalvariate(*BASELINES["Payment"])
-    pay_status = 200
-
-    # Inject Failure Mode: payment_gateway_down
-    if failure_mode == "payment_gateway_down":
-        pay_latency = random.uniform(2000, 3000) # Gateway timeout
-        if random.random() < 0.8:
-            pay_status = 504 # Gateway timeout
-
-    # 6. Database Span
-    db_span = str(uuid.uuid4())
-    db_latency = random.normalvariate(*BASELINES["Database"])
-    db_status = 200
-
-    # Inject Failure Mode: database_slowdown
-    if failure_mode == "database_slowdown":
-        db_latency = random.uniform(4000, 6000) # SQL lock wait / missing index
-        if random.random() < 0.2:
-            db_status = 500 # Internal DB timeout / error
-
-    db_start = pay_start + timedelta(milliseconds=10)
-    write_trace(cursor, trace_id, db_span, pay_span, "Database", "INSERT INTO transactions VALUES (?, ?)", db_latency, db_status, db_start)
-    write_log(cursor, "Database", "INFO", "Beginning SQL transaction block", trace_id, db_start)
-    
-    if db_status == 500:
-        write_log(cursor, "Database", "CRITICAL", "PGSQL Lock Wait Timeout exceeded - lock detected on transaction table", trace_id, db_start + timedelta(milliseconds=100))
-    elif failure_mode == "database_slowdown":
-        write_log(cursor, "Database", "WARNING", "Slow query detected: table scan took longer than threshold", trace_id, db_start + timedelta(milliseconds=db_latency))
+        gw_start_ns = int(timestamp.timestamp() * 1e9)
+        run_span(0, gw_start_ns)
+        
     else:
-        write_log(cursor, "Database", "INFO", "SQL transaction committed", trace_id, db_start + timedelta(milliseconds=db_latency))
-
-    # Payment wraps up
-    actual_pay_latency = pay_latency + db_latency
-    write_trace(cursor, trace_id, pay_span, checkout_span, "Payment", "/v1/charges/create", actual_pay_latency, pay_status if db_status == 200 else 500, pay_start)
-    write_log(cursor, "Payment", "INFO", "Processing credit card capture via external gateway", trace_id, pay_start)
-    
-    if pay_status == 504:
-        write_log(cursor, "Payment", "ERROR", "Failed to connect to external processor: Gateway Timeout", trace_id, pay_start + timedelta(milliseconds=1500))
-    elif db_status == 500:
-        write_log(cursor, "Payment", "ERROR", "Internal transaction failure due to database rollback", trace_id, pay_start + timedelta(milliseconds=db_latency))
-
-    # Checkout wraps up
-    checkout_status = 200
-    if pay_status != 200 or db_status != 200:
-        checkout_status = 500
-
-    checkout_latency = 5 + inv_latency + actual_pay_latency
-    write_trace(cursor, trace_id, checkout_span, gateway_span, "Checkout", "/v1/checkout/process", checkout_latency, checkout_status, chk_start)
-    write_log(cursor, "Checkout", "INFO", "Processing order summary details", trace_id, chk_start)
-    
-    if checkout_status == 500:
-        write_log(cursor, "Checkout", "CRITICAL", "Checkout workflow failed - throwing HTTP 500 Internal Server Error", trace_id, chk_start + timedelta(milliseconds=checkout_latency))
-
-    # 1. Gateway Parent Span Finalizes
-    write_trace(cursor, trace_id, gateway_span, None, "Gateway", "/checkout", checkout_latency + 10, checkout_status, gw_start)
-    
-    # Write system metrics
-    write_metric(cursor, "Gateway", "http.latency", checkout_latency + 10, gw_start)
-    write_metric(cursor, "Database", "db.connection_count", random.randint(18, 25) if failure_mode != "database_slowdown" else random.randint(95, 120), gw_start)
-    write_metric(cursor, "Checkout", "cpu.utilization", random.uniform(5.0, 15.0), gw_start)
+        # Fallback Hardcoded Simulation (If DB is empty or unindexed)
+        # We will just generate a tiny Gateway trace to prove it's alive
+        gw_start_ns = int(timestamp.timestamp() * 1e9)
+        with tracer.start_as_current_span("Gateway", start_time=gw_start_ns, end_on_exit=False) as gw_span:
+            gw_span.set_attribute("service", "Gateway")
+            gw_span.set_attribute("endpoint", "/")
+            gw_span.add_event("Processing request", timestamp=gw_start_ns, attributes={"level": "INFO"})
+            gw_end_ns = gw_start_ns + int(15 * 1e6)
+            gw_span.end(end_time=gw_end_ns)
 
 def run_continuous(interval=1.0):
-    """Runs a continuous loop inserting telemetry."""
     print("Starting continuous telemetry simulation... Press Ctrl+C to stop.")
-    conn = sqlite3.connect(DB_PATH)
     try:
         while True:
-            simulate_request(conn)
-            conn.commit()
+            simulate_request()
             time.sleep(interval + random.uniform(-0.1, 0.2))
     except KeyboardInterrupt:
         print("\nTelemetry simulation stopped.")
-    finally:
-        conn.close()
 
 def generate_bulk(duration_minutes=20, rate_per_second=2):
-    """Generates bulk historical logs, traces, and metrics over a historical range."""
-    print(f"Generating {duration_minutes} minutes of telemetry in bulk...")
-    init_db(force=True)
+    print(f"Generating {duration_minutes} minutes of dynamic codebase telemetry in bulk using OpenTelemetry...")
+    
+    # DO NOT init_db(force=True) here anymore, because it wipes the AST graph!!!
+    # Instead, we just delete the traces/logs from telemetry.db so the graph persists!
     conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM traces")
+    cursor.execute("DELETE FROM logs")
+    cursor.execute("DELETE FROM metrics")
+    conn.commit()
+    conn.close()
     
     total_seconds = duration_minutes * 60
     end_time = datetime.now()
     start_time = end_time - timedelta(minutes=duration_minutes)
 
-    # Let's say failure starts 5 minutes before the end of the timeline
     failure_start = end_time - timedelta(minutes=6)
     
     current_time = start_time
     request_count = 0
 
+    # Ensure nodes are loaded
+    global _CACHED_NODES, _CACHED_EDGES
+    _CACHED_NODES, _CACHED_EDGES = load_graph_topology()
+
     while current_time < end_time:
-        # Determine active mode based on current timestamp
         if current_time >= failure_start:
-            # We seed a specific failure mode in the DB history
-            # Choose database_slowdown as our default mock outage
-            os.environ["CHRONOS_SIMULATED_FAIL"] = "database_slowdown"
-            # Set the actual config state
+            mode = get_chaos_state()
+            if mode == "none":
+                # if someone passed via generate_bulk implicitly without setting state
+                mode = "database_slowdown"
             with open(STATE_PATH, "w") as f:
-                json.dump({"mode": "database_slowdown", "updated_at": str(current_time)}, f)
+                json.dump({"mode": mode, "updated_at": str(current_time)}, f)
         else:
             with open(STATE_PATH, "w") as f:
                 json.dump({"mode": "none", "updated_at": str(current_time)}, f)
 
-        # Simulate standard requests per second
         requests_this_sec = random.randint(1, rate_per_second + 1)
         for _ in range(requests_this_sec):
-            # Add small millisecond offsets within the second
             offset = random.randint(0, 999)
             req_time = current_time + timedelta(milliseconds=offset)
-            simulate_request(conn, timestamp=req_time)
+            simulate_request(timestamp=req_time)
             request_count += 1
 
         current_time += timedelta(seconds=1)
-        if request_count % 100 == 0:
-            conn.commit()
 
-    conn.commit()
-    conn.close()
-    
-    # Reset state to none at the end
+    # Force flush before exiting
+    provider.force_flush()
     set_chaos_state("none")
-    print(f"Bulk generation complete. Seeded {request_count} transactions.")
+    print(f"Bulk generation complete. Seeded {request_count} dynamic transactions via OpenTelemetry.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Telemetry Chaos Simulator")
@@ -283,6 +321,7 @@ if __name__ == "__main__":
     elif args.command == "inject":
         set_chaos_state(args.mode)
     elif args.command == "bulk":
+        set_chaos_state(args.mode)
         generate_bulk(duration_minutes=args.minutes)
     elif args.command == "status":
         print(f"Active Failure Mode: {get_chaos_state()}")
