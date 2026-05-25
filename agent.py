@@ -194,8 +194,15 @@ def get_codebase_blueprint():
                 filepath = os.path.join(root, filename)
                 rel_path = os.path.relpath(filepath, code_dir)
                 try:
-                    with open(filepath, "r") as f:
-                        blueprint[rel_path] = f.read()
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                        
+                        # Hard limit to prevent massive LLMs from choking/timing out
+                        if sum(len(c) for c in blueprint.values()) + len(content) > 15000:
+                            blueprint[rel_path] = content[:1000] + "\n\n...[TRUNCATED TO PREVENT LLM CONTEXT TIMEOUT]..."
+                            break
+                            
+                        blueprint[rel_path] = content
                     file_count += 1
                 except Exception as e:
                     print(f"Error reading codebase file {filepath}: {e}")
@@ -206,10 +213,10 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
     Sends the dynamically constructed graph telemetry AND the local codebase 
     files AND the static codebase graph to a local Ollama model or a remote API (OpenRouter/OpenAI compatible) for reasoning.
     """
-    api_key = api_key_override if api_key_override else os.environ.get("API_KEY")
-    api_model = api_model_override if api_model_override else os.environ.get("API_MODEL")
-    ollama_url = ollama_url_override if ollama_url_override else os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
-    ollama_model = ollama_model_override if ollama_model_override else os.environ.get("OLLAMA_MODEL", "llama3")
+    api_key = (api_key_override if api_key_override else os.environ.get("API_KEY", "")).strip()
+    api_model = (api_model_override if api_model_override else os.environ.get("API_MODEL", "")).strip()
+    ollama_url = (ollama_url_override if ollama_url_override else os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")).strip()
+    ollama_model = (ollama_model_override if ollama_model_override else os.environ.get("OLLAMA_MODEL", "llama3")).strip()
     
     # Fetch local codebase files and AST Graph
     codebase = get_codebase_blueprint()
@@ -259,7 +266,11 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
     Ensure your output is ONLY the raw JSON string, starting with {{ and ending with }}. Do not wrap it in markdown codeblocks.
     """
 
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Chronos-Agent/1.0",
+        "HTTP-Referer": "http://localhost:8000"
+    }
     
     if api_key and api_model:
         # Use OpenRouter/OpenAI compatible API
@@ -269,7 +280,14 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
             "model": api_model,
             "messages": [{"role": "user", "content": prompt}]
         }
-        headers["Authorization"] = f"Bearer {api_key}"
+        
+        # Robustly strip redundant Bearer prefix or quotes
+        clean_key = api_key
+        if clean_key.lower().startswith("bearer "):
+            clean_key = clean_key[7:].strip()
+        clean_key = clean_key.strip("'\"")
+        
+        headers["Authorization"] = f"Bearer {clean_key}"
     elif api_key:
         # Fallback for Gemini SDK API directly (if they only gave key)
         print("Routing to Gemini API...")
@@ -297,7 +315,7 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=120) as response:
             res_body = json.loads(response.read().decode("utf-8"))
             if api_key and api_model:
                 raw_text = res_body["choices"][0]["message"]["content"]
@@ -306,10 +324,15 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
             else:
                 raw_text = res_body["response"]
                 
+            import re
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
             return json.loads(raw_text.strip())
     except urllib.error.HTTPError as e:
-        print(f"API HTTP Error: {e.read().decode('utf-8')}")
-        return {"error": f"API returned error: {e}"}
+        error_msg = e.read().decode('utf-8')
+        print(f"API HTTP Error: {error_msg}")
+        return {"error": f"API returned error: {error_msg}"}
     except Exception as e:
         print(f"Error communicating with LLM: {e}")
         return {"error": f"Internal agent reasoning error: {e}"}
