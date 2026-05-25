@@ -1,4 +1,5 @@
 # JIT GraphRAG Extractor & Gemini Reasoning Agent
+import re
 import sqlite3
 import json
 import urllib.request
@@ -177,35 +178,46 @@ def get_indexed_codebase_graph():
 
 def get_codebase_blueprint():
     """
-    Scans the codebase directory recursively, reading microservice codebase files
-    and mapping their filenames to their raw file contents for in-context LLM alignment.
+    Scans the codebase directory recursively, reading Python files and mapping
+    filenames to raw contents for in-context LLM alignment. Skips test/build dirs.
     """
+    # Improvement #7: Skip noisy directories that pollute the LLM context
+    SKIP_DIRS = frozenset({
+        "tests", "test", "__pycache__", ".git", "docs", "doc",
+        "migrations", "alembic", "node_modules", ".tox", "dist", "build",
+        "examples", "example", ".eggs", "htmlcov",
+    })
+    SKIP_FILE_PREFIXES = ("test_", "conftest", "setup", "__")
+
     code_dir = os.environ.get("CODEBASE_DIR", "services")
     blueprint = {}
     if not os.path.exists(code_dir):
         return blueprint
 
     file_count = 0
-    for root, _, files in os.walk(code_dir):
+    for root, dirs, files in os.walk(code_dir):
+        # Prune traversal in-place to avoid entering skip dirs
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
         for filename in files:
-            if filename.endswith(".py"):
-                if file_count >= 100:  # Safety ceiling
-                    break
-                filepath = os.path.join(root, filename)
-                rel_path = os.path.relpath(filepath, code_dir)
-                try:
-                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                        content = f.read()
-                        
-                        # Hard limit to prevent massive LLMs from choking/timing out
-                        if sum(len(c) for c in blueprint.values()) + len(content) > 15000:
-                            blueprint[rel_path] = content[:1000] + "\n\n...[TRUNCATED TO PREVENT LLM CONTEXT TIMEOUT]..."
-                            break
-                            
-                        blueprint[rel_path] = content
-                    file_count += 1
-                except Exception as e:
-                    print(f"Error reading codebase file {filepath}: {e}")
+            if not filename.endswith(".py"):
+                continue
+            if filename.startswith(SKIP_FILE_PREFIXES):
+                continue
+            if file_count >= 100:  # Safety ceiling
+                break
+            filepath = os.path.join(root, filename)
+            rel_path = os.path.relpath(filepath, code_dir)
+            try:
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                    # Hard limit to prevent massive LLMs from choking/timing out
+                    if sum(len(c) for c in blueprint.values()) + len(content) > 15000:
+                        blueprint[rel_path] = content[:1000] + "\n\n...[TRUNCATED TO PREVENT LLM CONTEXT TIMEOUT]..."
+                        break
+                    blueprint[rel_path] = content
+                file_count += 1  # Bug #8 fix: increment here, in correct scope
+            except Exception as e:
+                print(f"Error reading codebase file {filepath}: {e}")
     return blueprint
 
 def analyze_incident(graph_data, user_query="Analyze the codebase for bottlenecks.", ollama_url_override="", ollama_model_override="", api_key_override="", api_model_override=""):
@@ -324,7 +336,6 @@ def analyze_incident(graph_data, user_query="Analyze the codebase for bottleneck
             else:
                 raw_text = res_body["response"]
                 
-            import re
             match = re.search(r'\{.*\}', raw_text, re.DOTALL)
             if match:
                 return json.loads(match.group(0))

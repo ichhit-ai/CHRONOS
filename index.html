@@ -982,6 +982,29 @@
             d.fy = null;
         }
 
+        // ── Improvement #3: Persist LLM settings across page reloads ──
+        const LLM_FIELDS = ["ollama-url", "ollama-model", "api-key", "api-model"];
+        function saveLLMSettings() {
+            LLM_FIELDS.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) localStorage.setItem(`chronos_${id}`, el.value);
+            });
+        }
+        function loadLLMSettings() {
+            LLM_FIELDS.forEach(id => {
+                const saved = localStorage.getItem(`chronos_${id}`);
+                const el = document.getElementById(id);
+                if (saved !== null && el) el.value = saved;
+            });
+        }
+        // Load saved settings immediately on page load
+        loadLLMSettings();
+        // Save any change automatically
+        LLM_FIELDS.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener("input", saveLLMSettings);
+        });
+
         // Fetch metrics, call logs, and construct the D3 dashboard
         async function fetchTelemetry() {
             try {
@@ -1186,6 +1209,10 @@
                 const data = await res.json();
                 const analysis = data.analysis;
                 
+                if (analysis.error) {
+                    throw new Error(analysis.error);
+                }
+                
                 // Set text outputs
                 document.getElementById("rep-symptom").textContent = analysis.incident_summary;
                 document.getElementById("rep-cause").textContent = `${analysis.suspected_root_cause}`;
@@ -1290,7 +1317,7 @@
 
             } catch (err) {
                 console.error("Diagnosis error:", err);
-                alert("Agent query failed. Ensure backend and Ollama/Gemini are running.");
+                alert("Agent query failed:\n" + err.message + "\n\n(If using a free OpenRouter model, it may be overloaded or timing out).");
             } finally {
                 btn.classList.remove("scanning");
                 btn.innerHTML = `<i class="fa-solid fa-brain"></i> Ask Agent`;

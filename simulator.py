@@ -157,6 +157,13 @@ def load_graph_topology():
 _CACHED_NODES = None
 _CACHED_EDGES = None
 
+def invalidate_cache():
+    """Clears the in-memory topology cache so the next simulate_request() reloads from DB."""
+    global _CACHED_NODES, _CACHED_EDGES
+    _CACHED_NODES = None
+    _CACHED_EDGES = None
+    print("Simulator topology cache invalidated. Will reload from DB on next request.")
+
 # --- Simulation Logic ---
 def simulate_request(timestamp=None):
     """Simulates a complete transaction using dynamic codebase AST topologies."""
@@ -196,8 +203,9 @@ def simulate_request(timestamp=None):
             is_failing = False
             
             if failure_mode != "none":
-                # Inject failure at the leaf of the stack
-                if node_idx == len(path) - 1 and random.random() < 0.25:
+                # Bug #4 fix: Inject failure at leaf with 65% probability, or any node with 20%
+                is_leaf = node_idx == len(path) - 1
+                if (is_leaf and random.random() < 0.65) or (not is_leaf and random.random() < 0.20):
                     latency = random.uniform(800, 3000)
                     status = 500
                     is_failing = True

@@ -112,13 +112,14 @@ class CodebaseASTScanner(ast.NodeVisitor):
     def __init__(self, filename: str, source: str, dep_map: dict[str, str]):
         self.filename = filename
         self.source = source
-        self.dep_map = dep_map          # { attr_name: param_or_class_name }
+        self.dep_map = dep_map
         self.current_class: str | None = None
         self.current_function: str | None = None
         self.nodes: list[dict] = []
         self.edges: list[dict] = []
+        # Bug #5 fix: track seen node IDs to prevent duplicates during visit_Call
+        self._seen_node_ids: set = set()
         # Track which method names belong to which class across the repo
-        # (populated externally after all files are scanned)
         self.global_method_index: dict[str, list[str]] = {}
 
     def visit_Import(self, node: ast.Import):
@@ -249,13 +250,16 @@ class CodebaseASTScanner(ast.NodeVisitor):
             # --- Database operations ---
             if method_name in DB_METHOD_NAMES or (obj_name and obj_name in DB_ATTR_HINTS):
                 db_node_id = self._infer_db_table(node, fallback_label="Database")
-                self.nodes.append({
-                    "id": db_node_id,
-                    "label": db_node_id.split(":")[-1],
-                    "type": "DatabaseTable",
-                    "source_file": self.filename,
-                    "code_block": "",
-                })
+                # Bug #5 fix: only append if this node ID hasn't been seen before
+                if db_node_id not in self._seen_node_ids:
+                    self._seen_node_ids.add(db_node_id)
+                    self.nodes.append({
+                        "id": db_node_id,
+                        "label": db_node_id.split(":")[-1],
+                        "type": "DatabaseTable",
+                        "source_file": self.filename,
+                        "code_block": "",
+                    })
                 self.edges.append({
                     "source": caller_id,
                     "target": db_node_id,
@@ -267,13 +271,16 @@ class CodebaseASTScanner(ast.NodeVisitor):
                 url_hint = self._extract_url_hint(node)
                 gw_label = url_hint or obj_name
                 gw_id = f"ExternalAPI:{gw_label}"
-                self.nodes.append({
-                    "id": gw_id,
-                    "label": gw_label,
-                    "type": "ExternalGateway",
-                    "source_file": self.filename,
-                    "code_block": "",
-                })
+                # Bug #5 fix: only append if this gateway node hasn't been seen
+                if gw_id not in self._seen_node_ids:
+                    self._seen_node_ids.add(gw_id)
+                    self.nodes.append({
+                        "id": gw_id,
+                        "label": gw_label,
+                        "type": "ExternalGateway",
+                        "source_file": self.filename,
+                        "code_block": "",
+                    })
                 self.edges.append({
                     "source": caller_id,
                     "target": gw_id,
@@ -478,13 +485,25 @@ def run_local_ast_indexing(target_dir: str = "services"):
         return [], []
 
     # ── Pass 1: Collect dependency maps from __init__ across all files ──
-    file_sources: dict[str, str] = {}      # filepath -> source code
-    file_dep_maps: dict[str, dict] = {}    # filepath -> { attr: hint }
-    class_to_file: dict[str, str] = {}     # class_name -> filepath
+    # Improvement #7: Skip test/build/doc directories to keep the graph clean
+    SKIP_DIRS = frozenset({
+        "tests", "test", "__pycache__", ".git", "docs", "doc",
+        "migrations", "alembic", "node_modules", ".tox", "dist", "build",
+        "examples", "example", ".eggs", "htmlcov",
+    })
+    SKIP_FILE_PREFIXES = ("test_", "conftest", "setup", "__")
 
-    for root, _, files in os.walk(target_dir):
+    file_sources: dict[str, str] = {}
+    file_dep_maps: dict[str, dict] = {}
+    class_to_file: dict[str, str] = {}
+
+    for root, dirs, files in os.walk(target_dir):
+        # Prune traversal in-place so os.walk never enters skip dirs
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
         for filename in files:
             if not filename.endswith(".py"):
+                continue
+            if filename.startswith(SKIP_FILE_PREFIXES):
                 continue
             filepath = os.path.join(root, filename)
             try:
